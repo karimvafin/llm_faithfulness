@@ -41,25 +41,34 @@ def _pick_replacement(
     return rng.choice(candidates)
 
 
-def _recompute_schema_links(slots: list[str], db_schema: dict[str, list[str]]) -> dict[str, list[str]]:
-    """Walk slots, classify, and (re)build schema_links so the mediator is self-consistent."""
-    out: dict[str, list[str]] = {}
-    column_to_tables: dict[str, list[str]] = {}
-    for table, cols in db_schema.items():
-        for col in cols:
-            column_to_tables.setdefault(col, []).append(table)
+def _swap_table(links: dict[str, list[str]], before: str, after: str) -> None:
+    """Rename table key before → after, merging columns if `after` already exists."""
+    if before not in links:
+        return
+    cols = links.pop(before)
+    if after in links:
+        seen = set(links[after])
+        for c in cols:
+            if c not in seen:
+                links[after].append(c)
+                seen.add(c)
+    else:
+        links[after] = cols
 
-    for value in slots:
-        v_lc = value.lower()
-        if v_lc in db_schema:
-            out.setdefault(v_lc, [])
-        elif v_lc in column_to_tables:
-            for table in column_to_tables[v_lc]:
-                cols = out.setdefault(table, [])
-                if v_lc not in cols:
-                    cols.append(v_lc)
 
-    return {t: sorted(set(cs)) for t, cs in out.items()}
+def _swap_column(links: dict[str, list[str]], before: str, after: str) -> None:
+    """Replace `before` with `after` in every table's column list (deduped)."""
+    for t in links:
+        if before not in links[t]:
+            continue
+        new_cols: list[str] = []
+        seen: set[str] = set()
+        for c in links[t]:
+            new_c = after if c == before else c
+            if new_c not in seen:
+                new_cols.append(new_c)
+                seen.add(new_c)
+        links[t] = new_cols
 
 
 class PAUQInterventionStrategy:
@@ -93,21 +102,29 @@ class PAUQInterventionStrategy:
         kinds_recorded: list[SlotKind] = []
 
         new_slots = list(slots)
+        new_links = {t: list(cols) for t, cols in mediator.schema_links.items()}
+
         for i in chosen:
-            original = new_slots[i]
+            original = slots[i]
             kind = kinds[i]
             repl = _pick_replacement(original, kind, entry.db_schema, rng)
             if repl is None:
                 continue
-            for j, v in enumerate(new_slots):
-                if v == original:
+
+            for j in range(len(new_slots)):
+                if slots[j] == original:
                     new_slots[j] = repl
+
+            if kind == "table":
+                _swap_table(new_links, original, repl)
+            elif kind == "column":
+                _swap_column(new_links, original, repl)
+
             replaced_indices.append(i)
             before.append(original)
             after.append(repl)
             kinds_recorded.append(kind)
 
-        new_links = _recompute_schema_links(new_slots, entry.db_schema)
         new_med = PAUQMediator(skeleton=mediator.skeleton, schema_links=new_links, slots=new_slots)
         rec = PAUQIntervention(
             level=level,

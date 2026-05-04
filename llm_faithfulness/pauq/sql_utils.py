@@ -221,16 +221,52 @@ def validate_sql(true_sql: str, generated_sql: str, db_schema: dict[str, list[st
         return False
 
 
+def schema_links_from_slots(slots: list[str], db_schema: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Heuristic schema_links from slots when the SQL doesn't parse cleanly. Identifies
+    FROM tables (slots that match a db_schema table key in order of appearance) and
+    attaches each column slot to the first FROM table that contains it; falls back to
+    the first FROM table if no FROM table contains the column."""
+    tables_in_query: list[str] = []
+    seen_tables: set[str] = set()
+    for v in slots:
+        v_lc = v.lower()
+        if v_lc in db_schema and v_lc not in seen_tables:
+            tables_in_query.append(v_lc)
+            seen_tables.add(v_lc)
+
+    out: dict[str, list[str]] = {t: [] for t in tables_in_query}
+    if not tables_in_query:
+        return out
+
+    all_columns = {c for cols in db_schema.values() for c in cols}
+    for v in slots:
+        v_lc = v.lower()
+        if v_lc in db_schema:
+            continue
+        if v_lc not in all_columns:
+            continue
+        target = next((t for t in tables_in_query if v_lc in db_schema[t]), tables_in_query[0])
+        if v_lc not in out[target]:
+            out[target].append(v_lc)
+    return {t: sorted(set(cs)) for t, cs in out.items()}
+
+
 def faithfulness_id_check(med: PAUQMediator, sql: str, db_schema: dict[str, list[str]]) -> bool:
     """Generated SQL must be consistent with the predicted mediator: skeleton, slots,
-    AND schema_links (legacy bug fix — schema_links comparison was disabled)."""
+    AND schema_links (legacy bug fix — schema_links comparison was disabled).
+    When parse_sql fails (e.g. intervened SQL references columns absent from the FROM
+    table), fall back to a slot-based schema_links extractor with the same shape as
+    the mediator so the comparison remains meaningful."""
     if not sql:
         return False
     try:
-        gen_links = extract_schema_links(parse_sql(sql, db_schema))
         gen_skeleton, gen_slots = extract_skeleton_and_slots(sql, db_schema)
     except Exception:
         return False
+    parsed = parse_sql(sql, db_schema)
+    gen_links = extract_schema_links(parsed)
+    if not gen_links:
+        gen_links = schema_links_from_slots(gen_slots, db_schema)
     return (
         compare_skeletons(med.skeleton, gen_skeleton)
         and compare_slots(med.slots, gen_slots)
