@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.env
+
+runs/
+checkpoints/
+dpo_data/
+plots/
+data/pauq/*.json
+
+*.egg-info/
+build/
+dist/
