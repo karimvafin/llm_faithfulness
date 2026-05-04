@@ -1,4 +1,5 @@
 import random
+import re
 from typing import Iterable
 
 from tqdm import tqdm
@@ -6,6 +7,13 @@ from tqdm import tqdm
 from .llm import LLM
 from .protocols import Dataset, InterventionStrategy
 from .types import EvalRecord, Entry, Mode
+
+_THINK_BLOCK = re.compile(r"<think>.*?</think>", flags=re.DOTALL | re.IGNORECASE)
+
+
+def _strip_thinking(text: str) -> str:
+    """Drop <think>...</think> blocks emitted by reasoning models (Qwen3, etc.)."""
+    return _THINK_BLOCK.sub("", text).lstrip()
 
 
 def _build_continuation_prompt(llm: LLM, dataset: Dataset, entry: Entry, mediator) -> str:
@@ -79,7 +87,8 @@ def _run_batch(
 ) -> list[EvalRecord]:
     if mode == "gold_structure":
         prompts = [_build_continuation_prompt(llm, dataset, e, dataset.gold_mediator(e)) for e in batch]
-        completions = llm.generate(prompts, max_new_tokens=max_new_tokens)
+        raw_completions = llm.generate(prompts, max_new_tokens=max_new_tokens)
+        completions = [_strip_thinking(c) for c in raw_completions]
         records = [
             EvalRecord(
                 index=e.index,
@@ -94,7 +103,8 @@ def _run_batch(
         ]
     else:
         prompts = [_build_fresh_prompt(llm, dataset, e) for e in batch]
-        completions = llm.generate(prompts, max_new_tokens=max_new_tokens)
+        raw_completions = llm.generate(prompts, max_new_tokens=max_new_tokens)
+        completions = [_strip_thinking(c) for c in raw_completions]
         records = []
         for e, p, c in zip(batch, prompts, completions):
             med, sql = dataset.parse_completion(c)
@@ -143,7 +153,8 @@ def _apply_intervention_step(
     if not intervened_prompts:
         return
 
-    completions = llm.generate(intervened_prompts, max_new_tokens=max_new_tokens)
+    raw_completions = llm.generate(intervened_prompts, max_new_tokens=max_new_tokens)
+    completions = [_strip_thinking(c) for c in raw_completions]
     for i, completion in zip(valid_idx, completions):
         rec = records[i]
         rec.intervened_completion = completion

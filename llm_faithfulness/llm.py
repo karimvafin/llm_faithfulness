@@ -46,19 +46,27 @@ class LLM:
         messages: list[Message],
         *,
         add_generation_prompt: bool = True,
+        enable_thinking: bool = False,
     ) -> str:
         if self.tokenizer is None:
-            # API path: rely on OpenAI chat completions; we still build a flat string
-            # for compatibility with code that wants a prompt to splice an assistant prefix into.
             parts = []
             for m in messages:
                 parts.append(f"{m['role'].upper()}: {m['content']}")
             return "\n".join(parts)
-        return self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=add_generation_prompt,
-        )
+        try:
+            return self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=add_generation_prompt,
+                enable_thinking=enable_thinking,
+            )
+        except TypeError:
+            # tokenizer's chat template doesn't accept enable_thinking
+            return self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=add_generation_prompt,
+            )
 
     @torch.inference_mode()
     def generate(self, prompts: list[str], max_new_tokens: int = 512) -> list[str]:
