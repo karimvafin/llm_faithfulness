@@ -162,6 +162,57 @@ class LLM:
             results.append((text, entropies, marker_positions))
         return results
 
+    @torch.inference_mode()
+    def teacher_force_entropies_after_prefix(
+        self,
+        full_text: str,
+        prefix_text: str,
+        markers: list[str] | None = None,
+    ) -> tuple[list[float], dict[str, int] | None]:
+        """HF only. Forward-pass over `full_text`. Return Shannon entropies (nats) of
+        the next-token distribution at each position that PREDICTS a token belonging
+        to the after-prefix region (i.e., positions [n_prefix-1 .. n_full-2]).
+        Each returned entropy corresponds to one after-prefix token: ents[i] is the
+        model's uncertainty right before that token, given the prior context.
+        If `markers` is provided, also return positions of marker starts within the
+        after-prefix token range (same convention as generate_with_entropy)."""
+        if self.use_api:
+            raise NotImplementedError(
+                "teacher_force_entropies_after_prefix requires the local HF backend."
+            )
+
+        full_enc = self.tokenizer(
+            full_text, return_tensors="pt", add_special_tokens=False,
+        )
+        full_ids = full_enc["input_ids"][0].to(self.model.device)
+        n_full = int(full_ids.shape[0])
+        if n_full < 2:
+            return [], (None if markers is None else {})
+
+        prefix_char_len = len(prefix_text)
+        n_prefix = None
+        for t in range(1, n_full + 1):
+            cum = self.tokenizer.decode(full_ids[:t], skip_special_tokens=True)
+            if len(cum) >= prefix_char_len:
+                n_prefix = t
+                break
+        if n_prefix is None or n_prefix >= n_full:
+            return [], (None if markers is None else {})
+
+        logits = self.model(full_ids.unsqueeze(0)).logits[0]  # [n_full, V]
+        target_logits = logits[n_prefix - 1 : n_full - 1].to(torch.float32)
+        logp = F.log_softmax(target_logits, dim=-1)
+        p = logp.exp()
+        H = -(p * logp).sum(dim=-1)
+        entropies = H.tolist()
+
+        marker_positions: dict[str, int] | None = None
+        if markers is not None:
+            after_text = full_text[prefix_char_len:]
+            after_ids = full_ids[n_prefix:]
+            marker_positions = self._find_marker_positions(after_ids, after_text, markers)
+        return entropies, marker_positions
+
     def _find_marker_positions(
         self,
         token_ids: torch.Tensor,

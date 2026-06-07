@@ -6,6 +6,9 @@ from llm_faithfulness.pauq.dataset import PAUQDataset
 from llm_faithfulness.pauq.intervention import PAUQInterventionStrategy
 
 
+_ALL_KINDS = ("gold_vs_intervened", "corrected_vs_unchanged")
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Generate DPO training pairs from PAUQ.")
     p.add_argument("--data-path", required=True)
@@ -14,6 +17,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output", required=True)
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument(
+        "--pair-kinds",
+        nargs="+",
+        choices=list(_ALL_KINDS),
+        default=list(_ALL_KINDS),
+        help="Which DPO pair kinds to emit per entry. "
+        "'gold_vs_intervened': chosen=gold M+SQL, rejected=intervened M+gold SQL. "
+        "'corrected_vs_unchanged': chosen=intervened M+SQL reconstructed from M, "
+        "rejected=intervened M+gold SQL.",
+    )
     return p.parse_args()
 
 
@@ -26,9 +39,13 @@ def main() -> None:
     intervention = PAUQInterventionStrategy()
     rng = random.Random(args.seed)
 
-    pairs = iter_dpo_pairs(dataset, intervention, level=args.intervention_level, rng=rng, limit=args.limit)
+    pairs = iter_dpo_pairs(
+        dataset, intervention,
+        level=args.intervention_level, rng=rng, limit=args.limit,
+        kinds=tuple(args.pair_kinds),
+    )
     n = write_jsonl(pairs, args.output)
-    print(f"wrote {n} pairs → {args.output}")
+    print(f"wrote {n} pairs → {args.output} (kinds={args.pair_kinds})")
 
 
 if __name__ == "__main__":

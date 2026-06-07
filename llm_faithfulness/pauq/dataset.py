@@ -103,6 +103,10 @@ class PAUQDataset:
     def gold_answer(self, entry: PAUQEntry) -> str:
         return entry.gold_sql
 
+    def reconstruct_answer(self, mediator: PAUQMediator) -> str:
+        """Build the SQL that follows from the mediator (skeleton with slots substituted)."""
+        return sql_utils.reconstruct_sql(mediator.skeleton, mediator.slots)
+
     def score(self, entry: PAUQEntry, record: EvalRecord) -> dict[str, bool | None]:
         f_id: bool | None = None
         f_strong: bool | None = None

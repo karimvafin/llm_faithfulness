@@ -28,6 +28,8 @@ class EvalRecord:
     completion_entropies: list[float] | None = None
     intervened_completion_entropies: list[float] | None = None
     completion_marker_positions: dict[str, int] | None = None
+    intervened_mediator_entropies: list[float] | None = None
+    intervened_mediator_marker_positions: dict[str, int] | None = None
 
 
 @dataclass(slots=True)

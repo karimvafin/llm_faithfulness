@@ -16,16 +16,20 @@ def _strip_thinking(text: str) -> str:
     return _THINK_BLOCK.sub("", text).lstrip()
 
 
-def _build_continuation_prompt(llm: LLM, dataset: Dataset, entry: Entry, mediator) -> str:
-    """Build a prompt where the user message is the standard prompt and the assistant
-    prefix is the rendered mediator (without the SQL line). The model then continues
-    by producing only the SQL."""
+def _build_continuation_parts(llm: LLM, dataset: Dataset, entry: Entry, mediator) -> tuple[str, str]:
+    """Return (base, mediator_text). `base` is the chat-template-closed user turn;
+    `mediator_text` is the rendered mediator (without final SQL) plus a trailing newline."""
     user = dataset.build_prompt(entry, gold_structure=False)
     base = llm.apply_chat_template(
         [{"role": "user", "content": user}],
         add_generation_prompt=False,
     )
-    return base + dataset.render_mediator(mediator, answer=None) + "\n"
+    return base, dataset.render_mediator(mediator, answer=None) + "\n"
+
+
+def _build_continuation_prompt(llm: LLM, dataset: Dataset, entry: Entry, mediator) -> str:
+    base, med_text = _build_continuation_parts(llm, dataset, entry, mediator)
+    return base + med_text
 
 
 def _build_fresh_prompt(llm: LLM, dataset: Dataset, entry: Entry) -> str:
@@ -173,6 +177,7 @@ def _apply_intervention_step(
     save_entropies: bool,
 ) -> None:
     intervened_prompts: list[str] = []
+    intervened_bases: list[str] = []
     valid_idx: list[int] = []
     for i, (entry, rec) in enumerate(zip(batch, records)):
         base_med = rec.predicted_mediator
@@ -181,9 +186,11 @@ def _apply_intervention_step(
         new_med, inter = intervention.apply(entry, base_med, level, rng)
         rec.intervention = inter
         rec.intervened_mediator = new_med
-        prompt = _build_continuation_prompt(llm, dataset, entry, new_med)
+        base, med_text = _build_continuation_parts(llm, dataset, entry, new_med)
+        prompt = base + med_text
         rec.intervened_prompt = prompt
         intervened_prompts.append(prompt)
+        intervened_bases.append(base)
         valid_idx.append(i)
 
     if not intervened_prompts:
@@ -198,3 +205,13 @@ def _apply_intervention_step(
         rec.intervened_completion = completion
         rec.intervened_answer = _truncate_sql(completion)
         rec.intervened_completion_entropies = ent
+
+    if save_entropies:
+        dataset_markers = getattr(dataset, "section_markers", None)
+        for i, prompt, base in zip(valid_idx, intervened_prompts, intervened_bases):
+            med_ents, med_markers = llm.teacher_force_entropies_after_prefix(
+                prompt, base, markers=dataset_markers,
+            )
+            rec = records[i]
+            rec.intervened_mediator_entropies = med_ents
+            rec.intervened_mediator_marker_positions = med_markers

@@ -81,33 +81,37 @@ def main() -> None:
     series: list[tuple] = []
     for i, r in enumerate(chosen):
         color = f"C{i % 10}"
-        markers = (r.get("completion_marker_positions") or None) if i == 0 else None
+        completion_markers = (r.get("completion_marker_positions") or None) if i == 0 else None
+        med_ents = r.get("intervened_mediator_entropies") or []
+        med_markers = (r.get("intervened_mediator_marker_positions") or None) if i == 0 else None
+        intervened_full = list(med_ents) + list(r.get("intervened_completion_entropies") or [])
+
         if args.field == "both":
             series.append((
                 short_label("pre", r["index"], r.get("predicted_answer")),
                 r["completion_entropies"],
                 {"color": color, "linestyle": "-"},
-                markers,
+                completion_markers,
             ))
             series.append((
                 short_label("post", r["index"], r.get("intervened_answer")),
-                r["intervened_completion_entropies"],
+                intervened_full,
                 {"color": color, "linestyle": "--"},
-                None,
+                med_markers,
             ))
         elif args.field == "completion":
             series.append((
                 short_label("completion", r["index"], r.get("predicted_answer")),
                 r["completion_entropies"],
                 {"color": color},
-                markers,
+                completion_markers,
             ))
         else:
             series.append((
                 short_label("intervened_completion", r["index"], r.get("intervened_answer")),
-                r["intervened_completion_entropies"],
+                intervened_full,
                 {"color": color},
-                None,
+                med_markers,
             ))
 
     title = f'{report.get("model", "?")} · {args.field} · L{report.get("intervention_level", "?")}'
