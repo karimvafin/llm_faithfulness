@@ -25,6 +25,9 @@ class EvalRecord:
     f_id: bool | None = None
     f_strong: bool | None = None
     perf: bool | None = None
+    completion_entropies: list[float] | None = None
+    intervened_completion_entropies: list[float] | None = None
+    completion_marker_positions: dict[str, int] | None = None
 
 
 @dataclass(slots=True)

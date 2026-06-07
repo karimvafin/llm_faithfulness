@@ -21,6 +21,12 @@ def _build_db_schema(db: dict) -> dict[str, list[str]]:
 
 class PAUQDataset:
     name: str = "pauq"
+    section_markers: list[str] = [
+        "===SKELETON===",
+        "===SCHEMA_LINKS===",
+        "===SLOT_MATCHING===",
+        "===SQL===",
+    ]
 
     def __init__(self, data_path: str, split: str = "dev"):
         if split not in {"train", "dev"}:

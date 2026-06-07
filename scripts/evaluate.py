@@ -22,11 +22,21 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--use-api", action="store_true")
     p.add_argument("--api-base-url", default=None)
+    p.add_argument(
+        "--save-entropies",
+        action="store_true",
+        help="Save per-token Shannon entropy of the next-token distribution for each "
+        "generated answer (HF backend only). Lets scripts/plot_token_entropy.py plot "
+        "without rerunning the model.",
+    )
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    if args.save_entropies and args.use_api:
+        raise SystemExit("--save-entropies requires the HF backend (not --use-api).")
+
     dataset = PAUQDataset(args.data_path, split=args.split)
     intervention = PAUQInterventionStrategy()
     llm = LLM(args.model_name, use_api=args.use_api, api_base_url=args.api_base_url)
@@ -41,6 +51,7 @@ def main() -> None:
         max_new_tokens=args.max_new_tokens,
         seed=args.seed,
         limit=args.limit,
+        save_entropies=args.save_entropies,
     )
     entries_by_index = {e.index: e for e in dataset}
     score_records(dataset, entries_by_index, records)
