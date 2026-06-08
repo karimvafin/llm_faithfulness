@@ -81,24 +81,32 @@ def main() -> None:
     series: list[tuple] = []
     pre_color = "#1f77b4"
     post_color = "#ff7f0e"
+    used_intervened_markers = False
     for i, r in enumerate(chosen):
         color = f"C{i % 10}"
-        completion_markers = (r.get("completion_marker_positions") or None) if i == 0 else None
+        completion_markers = None
         med_ents = r.get("intervened_mediator_entropies") or []
-        med_markers = (r.get("intervened_mediator_marker_positions") or None) if i == 0 else None
+        raw_med_markers = r.get("intervened_mediator_marker_positions") or None
+        med_markers = raw_med_markers if (raw_med_markers and not used_intervened_markers) else None
+        if med_ents:
+            if med_markers is None:
+                med_markers = {}
+            med_markers.setdefault("===SQL===", len(med_ents))
+        if med_markers is not None:
+            used_intervened_markers = True
         intervened_full = list(med_ents) + list(r.get("intervened_completion_entropies") or [])
 
         if args.field == "both":
             series.append((
                 "Predicted (pre-intervention)",
                 r["completion_entropies"],
-                {"color": pre_color, "linestyle": "-", "alpha": 0.35, "linewidth": 1.4},
-                completion_markers,
+                {"color": pre_color, "linestyle": "-", "linewidth": 1.4},
+                None,
             ))
             series.append((
                 "After intervention",
                 intervened_full,
-                {"color": post_color, "linestyle": "--", "alpha": 0.35, "linewidth": 1.4},
+                {"color": post_color, "linestyle": "--", "linewidth": 1.4},
                 med_markers,
             ))
         elif args.field == "completion":
