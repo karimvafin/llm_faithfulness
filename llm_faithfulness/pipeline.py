@@ -9,6 +9,8 @@ from .protocols import Dataset, InterventionStrategy
 from .types import EvalRecord, Entry, Mode
 
 _THINK_BLOCK = re.compile(r"<think>.*?</think>", flags=re.DOTALL | re.IGNORECASE)
+_CHAT_MARKER_LINE = re.compile(r"^<\|[^|>]+?\|>$")
+_LEADING_CHAT_MARKERS = re.compile(r"^(?:<\|[^|>]+?\|>\s*)+")
 
 
 def _strip_thinking(text: str) -> str:
@@ -41,7 +43,10 @@ def _build_fresh_prompt(llm: LLM, dataset: Dataset, entry: Entry) -> str:
 
 
 def _truncate_sql(text: str) -> str | None:
-    s = text.strip()
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    lines = [line for line in lines if not _CHAT_MARKER_LINE.fullmatch(line)]
+    s = "\n".join(lines).strip()
+    s = _LEADING_CHAT_MARKERS.sub("", s).strip()
     if not s:
         return None
     if ";" in s:

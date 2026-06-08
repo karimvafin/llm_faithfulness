@@ -102,20 +102,16 @@ def plot_token_entropy_vs_index(
         if markers:
             color = line.get_color()
             for marker_name, pos in markers.items():
-                ax.axvline(pos, color=color, linestyle=":", alpha=0.5, linewidth=1)
-                ann_label = marker_name if marker_name not in drawn_marker_labels else None
-                ax.annotate(
-                    marker_name,
-                    xy=(pos, 1.0),
-                    xycoords=("data", "axes fraction"),
-                    xytext=(2, -10),
-                    textcoords="offset points",
-                    fontsize=6,
-                    rotation=90,
+                marker_label = marker_name if marker_name not in drawn_marker_labels else "_nolegend_"
+                ax.axvline(
+                    pos,
                     color=color,
-                    alpha=0.7,
+                    linestyle=":",
+                    alpha=0.5,
+                    linewidth=1,
+                    label=marker_label,
                 )
-                if ann_label:
+                if marker_label != "_nolegend_":
                     drawn_marker_labels.add(marker_name)
 
     ax.set_xlabel("Token index")
@@ -123,7 +119,23 @@ def plot_token_entropy_vs_index(
     if title:
         ax.set_title(title)
     ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=8)
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        dedup: dict[str, object] = {}
+        for h, l in zip(handles, labels):
+            if l not in dedup:
+                dedup[l] = h
+        ax.legend(
+            dedup.values(),
+            dedup.keys(),
+            fontsize=9,
+            loc="best",
+            frameon=True,
+            framealpha=0.92,
+            fancybox=True,
+            borderpad=0.5,
+            handlelength=2.8,
+        )
     fig.tight_layout()
     fig.savefig(out_path, dpi=200)
     plt.close(fig)

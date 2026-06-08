@@ -79,6 +79,8 @@ def main() -> None:
         raise SystemExit("No matching records to plot.")
 
     series: list[tuple] = []
+    pre_color = "#1f77b4"
+    post_color = "#ff7f0e"
     for i, r in enumerate(chosen):
         color = f"C{i % 10}"
         completion_markers = (r.get("completion_marker_positions") or None) if i == 0 else None
@@ -88,15 +90,15 @@ def main() -> None:
 
         if args.field == "both":
             series.append((
-                short_label("pre", r["index"], r.get("predicted_answer")),
+                "Predicted (pre-intervention)",
                 r["completion_entropies"],
-                {"color": color, "linestyle": "-"},
+                {"color": pre_color, "linestyle": "-", "alpha": 0.35, "linewidth": 1.4},
                 completion_markers,
             ))
             series.append((
-                short_label("post", r["index"], r.get("intervened_answer")),
+                "After intervention",
                 intervened_full,
-                {"color": color, "linestyle": "--"},
+                {"color": post_color, "linestyle": "--", "alpha": 0.35, "linewidth": 1.4},
                 med_markers,
             ))
         elif args.field == "completion":
@@ -114,7 +116,8 @@ def main() -> None:
                 med_markers,
             ))
 
-    title = f'{report.get("model", "?")} · {args.field} · L{report.get("intervention_level", "?")}'
+    model_name = str(report.get("model", "?")).split("/")[-1]
+    title = f"{model_name} token entropies"
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     plot_token_entropy_vs_index(
         series,

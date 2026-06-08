@@ -7,6 +7,8 @@ from .types import PAUQMediator
 
 _LIT = re.compile(r'__(.+?)__')
 _SLOT = re.compile(r'\bSLOT_(\d+)\b')
+_CHAT_MARKER_LINE = re.compile(r"^<\|[^|>]+?\|>$")
+_LEADING_CHAT_MARKERS = re.compile(r"^(?:<\|[^|>]+?\|>\s*)+")
 
 _EMPTY_PARSED = {
     "except": None,
@@ -154,7 +156,9 @@ def parse_model_response(text: str) -> dict:
             sections[current].append(s)
 
     skeleton = "\n".join(sections["SKELETON"]).strip() or None
-    sql = "\n".join(sections["SQL"]).strip() or ""
+    sql_lines = [line for line in sections["SQL"] if not _CHAT_MARKER_LINE.fullmatch(line)]
+    sql = "\n".join(sql_lines).strip() or ""
+    sql = _LEADING_CHAT_MARKERS.sub("", sql).strip()
 
     schema_links: dict[str, list[str]] = {}
     for row in sections["SCHEMA_LINKS"]:
