@@ -50,3 +50,5 @@ class DPOPair:
     prompt: str
     chosen: str
     rejected: str
+    assistant_prefix: str | None = None
+    kind: str | None = None

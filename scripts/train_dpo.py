@@ -1,11 +1,12 @@
 import argparse
+import gc
 import os
 import random
 
 import numpy as np
 import torch
 from datasets import load_dataset
-from peft import LoraConfig, TaskType, get_peft_model
+from peft import LoraConfig, PeftModel, TaskType, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import DPOConfig, DPOTrainer
 
@@ -84,11 +85,20 @@ def make_format_func(tokenizer):
     eos = tokenizer.eos_token or ""
 
     def _format(example):
-        prompt_text = tokenizer.apply_chat_template(
-            [{"role": "user", "content": example["prompt"]}],
-            tokenize=False,
-            add_generation_prompt=True,
-        )
+        assistant_prefix = example.get("assistant_prefix")
+        if assistant_prefix:
+            prompt_text = tokenizer.apply_chat_template(
+                [{"role": "user", "content": example["prompt"]}],
+                tokenize=False,
+                add_generation_prompt=False,
+            )
+            prompt_text += assistant_prefix
+        else:
+            prompt_text = tokenizer.apply_chat_template(
+                [{"role": "user", "content": example["prompt"]}],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
         return {
             "prompt": prompt_text,
             "chosen": example["chosen"] + eos,

@@ -6,7 +6,7 @@ from llm_faithfulness.pauq.dataset import PAUQDataset
 from llm_faithfulness.pauq.intervention import PAUQInterventionStrategy
 
 
-_ALL_KINDS = ("gold_vs_intervened", "corrected_vs_unchanged")
+_ALL_KINDS = ("full_response", "sql_continuation", "gold_vs_intervened", "corrected_vs_unchanged")
 
 
 def parse_args() -> argparse.Namespace:
@@ -21,11 +21,27 @@ def parse_args() -> argparse.Namespace:
         "--pair-kinds",
         nargs="+",
         choices=list(_ALL_KINDS),
-        default=list(_ALL_KINDS),
+        default=["full_response"],
         help="Which DPO pair kinds to emit per entry. "
+        "'full_response': old-project style; chosen is a faithful full assistant block "
+        "(gold or intervened), rejected is an intervened mediator with chosen SQL. "
+        "'sql_continuation': prompt includes the intervened mediator prefix, "
+        "chosen/rejected are SQL-only continuations (matches evaluation intervention). "
         "'gold_vs_intervened': chosen=gold M+SQL, rejected=intervened M+gold SQL. "
         "'corrected_vs_unchanged': chosen=intervened M+SQL reconstructed from M, "
         "rejected=intervened M+gold SQL.",
+    )
+    p.add_argument(
+        "--chosen-intervention-prob",
+        type=float,
+        default=0.5,
+        help="For full_response pairs, probability that chosen uses an intervened faithful response.",
+    )
+    p.add_argument(
+        "--max-rejected-attempts",
+        type=int,
+        default=5,
+        help="For full_response pairs, retries to find a mediator/SQL mismatch for rejected.",
     )
     return p.parse_args()
 
@@ -43,6 +59,8 @@ def main() -> None:
         dataset, intervention,
         level=args.intervention_level, rng=rng, limit=args.limit,
         kinds=tuple(args.pair_kinds),
+        chosen_intervention_prob=args.chosen_intervention_prob,
+        max_rejected_attempts=args.max_rejected_attempts,
     )
     n = write_jsonl(pairs, args.output)
     print(f"wrote {n} pairs → {args.output} (kinds={args.pair_kinds})")
