@@ -15,7 +15,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--split", choices=["train", "dev"], default="train")
     p.add_argument("--intervention-level", type=int, default=3)
     p.add_argument("--output", required=True)
-    p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--limit", type=int, default=None, help="Maximum number of DPO pairs to write.")
+    p.add_argument("--sample-limit", type=int, default=None, help="Maximum number of dataset samples to process.")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument(
         "--pair-kinds",
@@ -23,8 +24,8 @@ def parse_args() -> argparse.Namespace:
         choices=list(_ALL_KINDS),
         default=["full_response"],
         help="Which DPO pair kinds to emit per entry. "
-        "'full_response': old-project style; chosen is a faithful full assistant block "
-        "(gold or intervened), rejected is an intervened mediator with chosen SQL. "
+        "'full_response': context_alignment style; emits balanced edit/gold pairs "
+        "over full assistant blocks. "
         "'sql_continuation': prompt includes the intervened mediator prefix, "
         "chosen/rejected are SQL-only continuations (matches evaluation intervention). "
         "'gold_vs_intervened': chosen=gold M+SQL, rejected=intervened M+gold SQL. "
@@ -34,8 +35,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--chosen-intervention-prob",
         type=float,
-        default=0.5,
-        help="For full_response pairs, probability that chosen uses an intervened faithful response.",
+        default=0.0,
+        help="Deprecated; kept for compatibility. full_response now always uses balanced edit/gold pairs.",
     )
     p.add_argument(
         "--max-rejected-attempts",
@@ -57,7 +58,7 @@ def main() -> None:
 
     pairs = iter_dpo_pairs(
         dataset, intervention,
-        level=args.intervention_level, rng=rng, limit=args.limit,
+        level=args.intervention_level, rng=rng, limit=args.limit, sample_limit=args.sample_limit,
         kinds=tuple(args.pair_kinds),
         chosen_intervention_prob=args.chosen_intervention_prob,
         max_rejected_attempts=args.max_rejected_attempts,

@@ -15,52 +15,84 @@ def _reconstruct_answer(dataset: Dataset, mediator) -> str | None:
     return dataset.reconstruct_answer(mediator)
 
 
-def _make_full_response_pair(
+def _is_self_faithful(dataset: Dataset, entry: Entry, mediator, answer: str | None) -> bool:
+    if not answer:
+        return False
+    db_schema = getattr(entry, "db_schema", None)
+    if db_schema is None:
+        return True
+    try:
+        from .pauq import sql_utils
+
+        return sql_utils.faithfulness_id_check(mediator, answer, db_schema)
+    except Exception:
+        return False
+
+
+def _answers_equivalent(entry: Entry, a: str | None, b: str | None) -> bool:
+    if not a or not b:
+        return a == b
+    db_schema = getattr(entry, "db_schema", None)
+    if db_schema is None:
+        return a.strip() == b.strip()
+    try:
+        from .pauq import sql_utils
+
+        return sql_utils.validate_sql(a, b, db_schema)
+    except Exception:
+        return a.strip() == b.strip()
+
+
+def _make_full_response_pairs(
     dataset: Dataset,
     intervention: InterventionStrategy,
     entry: Entry,
     level: int,
     rng: random.Random,
     *,
-    chosen_intervention_prob: float,
     max_rejected_attempts: int,
-) -> DPOPair | None:
-    """Match the old project's DPO construction.
+) -> list[DPOPair]:
+    """Match context_alignment's balanced DPO construction.
 
-    Chosen is a faithful full assistant response, either gold or intervened.
-    Rejected uses an intervened mediator but keeps chosen's SQL, breaking the
-    mediator/SQL correspondence.
+    For one valid edit, emit two pairs:
+    - edit direction: edited mediator prefers edited answer over gold answer;
+    - gold direction: gold mediator prefers gold answer over edited answer.
     """
     gold_med = dataset.gold_mediator(entry)
     gold_answer = dataset.gold_answer(entry)
     prompt = dataset.build_prompt(entry, gold_structure=False)
 
-    chosen_med = gold_med
-    chosen_answer = gold_answer
-    if rng.random() < chosen_intervention_prob:
+    for _ in range(max_rejected_attempts):
         intervened_med, _ = intervention.apply(entry, gold_med, level, rng)
         intervened_answer = _reconstruct_answer(dataset, intervened_med)
-        if intervened_answer:
-            chosen_med = intervened_med
-            chosen_answer = intervened_answer
-
-    chosen_str = dataset.render_mediator(chosen_med, answer=chosen_answer)
-
-    for _ in range(max_rejected_attempts):
-        rejected_med, _ = intervention.apply(entry, gold_med, level, rng)
-        rejected_answer = _reconstruct_answer(dataset, rejected_med)
-        if not rejected_answer or rejected_answer == chosen_answer:
+        if _answers_equivalent(entry, intervened_answer, gold_answer):
             continue
-        rejected_str = dataset.render_mediator(rejected_med, answer=chosen_answer)
-        if rejected_str != chosen_str:
-            return DPOPair(
-                prompt=prompt,
-                chosen=chosen_str,
-                rejected=rejected_str,
-                kind="full_response",
-            )
+        if not _is_self_faithful(dataset, entry, intervened_med, intervened_answer):
+            continue
 
-    return None
+        edit_chosen = dataset.render_mediator(intervened_med, answer=intervened_answer)
+        edit_rejected = dataset.render_mediator(intervened_med, answer=gold_answer)
+        gold_chosen = dataset.render_mediator(gold_med, answer=gold_answer)
+        gold_rejected = dataset.render_mediator(gold_med, answer=intervened_answer)
+
+        pairs: list[DPOPair] = []
+        if edit_chosen != edit_rejected:
+            pairs.append(DPOPair(
+                prompt=prompt,
+                chosen=edit_chosen,
+                rejected=edit_rejected,
+                kind="full_response_edit",
+            ))
+        if gold_chosen != gold_rejected:
+            pairs.append(DPOPair(
+                prompt=prompt,
+                chosen=gold_chosen,
+                rejected=gold_rejected,
+                kind="full_response_gold",
+            ))
+        return pairs
+
+    return []
 
 
 def make_dpo_pairs(
@@ -71,16 +103,17 @@ def make_dpo_pairs(
     rng: random.Random,
     *,
     kinds: Iterable[PairKind] = ("full_response",),
-    chosen_intervention_prob: float = 0.5,
+    chosen_intervention_prob: float = 0.0,
     max_rejected_attempts: int = 5,
 ) -> list[DPOPair]:
     """Build DPO pairs for one entry. Both kinds share the same intervened mediator.
 
     full_response:
-        chosen   = faithful full response (gold or intervened)
-        rejected = intervened M + chosen SQL (M↔SQL link broken)
+        Balanced context_alignment-style DPO:
+        edit pair: edited M + edited SQL > edited M + gold SQL
+        gold pair: gold M + gold SQL > gold M + edited SQL
 
-        This matches ../breaking-the-chain-intervention/prepare_dpo_data.py.
+        Edited SQL is included only if it is self-faithful to the edited mediator.
 
     gold_vs_intervened:
         chosen   = gold M + gold SQL          (faithful)
@@ -109,17 +142,14 @@ def make_dpo_pairs(
     requested = set(kinds)
 
     if "full_response" in requested:
-        pair = _make_full_response_pair(
+        pairs.extend(_make_full_response_pairs(
             dataset,
             intervention,
             entry,
             level,
             rng,
-            chosen_intervention_prob=chosen_intervention_prob,
             max_rejected_attempts=max_rejected_attempts,
-        )
-        if pair is not None:
-            pairs.append(pair)
+        ))
 
     if "sql_continuation" in requested and hasattr(dataset, "reconstruct_answer"):
         corrected_sql = _reconstruct_answer(dataset, intervened_med)
@@ -171,12 +201,15 @@ def iter_dpo_pairs(
     level: int,
     rng: random.Random,
     limit: int | None = None,
+    sample_limit: int | None = None,
     kinds: Iterable[PairKind] = ("full_response",),
-    chosen_intervention_prob: float = 0.5,
+    chosen_intervention_prob: float = 0.0,
     max_rejected_attempts: int = 5,
 ) -> Iterator[DPOPair]:
     n = 0
-    for entry in dataset:
+    for sample_idx, entry in enumerate(dataset):
+        if sample_limit is not None and sample_idx >= sample_limit:
+            break
         if limit is not None and n >= limit:
             break
         for pair in make_dpo_pairs(
