@@ -81,22 +81,44 @@ def build_model_and_tokenizer(args: argparse.Namespace):
     return model, tokenizer
 
 
+def _apply_chat_template(tokenizer, messages, *, add_generation_prompt):
+    """Mirror llm.LLM.apply_chat_template: keep thinking DISABLED so the training prompt
+    matches the evaluation prompt exactly. For Qwen3, enable_thinking=False makes the
+    template append an empty <think></think> block after the assistant header; omitting
+    it (template default True) yields a different prefix, and the DPO preference then
+    fails to transfer to the distribution scored at eval."""
+    try:
+        return tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=add_generation_prompt,
+            enable_thinking=False,
+        )
+    except TypeError:
+        # tokenizer's chat template doesn't accept enable_thinking (e.g. Falcon, Llama)
+        return tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=add_generation_prompt,
+        )
+
+
 def make_format_func(tokenizer):
     eos = tokenizer.eos_token or ""
 
     def _format(example):
         assistant_prefix = example.get("assistant_prefix")
         if assistant_prefix:
-            prompt_text = tokenizer.apply_chat_template(
+            prompt_text = _apply_chat_template(
+                tokenizer,
                 [{"role": "user", "content": example["prompt"]}],
-                tokenize=False,
                 add_generation_prompt=False,
             )
             prompt_text += assistant_prefix
         else:
-            prompt_text = tokenizer.apply_chat_template(
+            prompt_text = _apply_chat_template(
+                tokenizer,
                 [{"role": "user", "content": example["prompt"]}],
-                tokenize=False,
                 add_generation_prompt=True,
             )
         return {
