@@ -24,8 +24,8 @@ def parse_args() -> argparse.Namespace:
         choices=list(_ALL_KINDS),
         default=["full_response"],
         help="Which DPO pair kinds to emit per entry. "
-        "'full_response': context_alignment style; emits balanced edit/gold pairs "
-        "over full assistant blocks. "
+        "'full_response': emits two full-block pairs per valid intervention: "
+        "X-M-Y > X-M'-Y and X-M'-Y' > X-M'-Y. "
         "'sql_continuation': prompt includes the intervened mediator prefix, "
         "chosen/rejected are SQL-only continuations (matches evaluation intervention). "
         "'gold_vs_intervened': chosen=gold M+SQL, rejected=intervened M+gold SQL. "

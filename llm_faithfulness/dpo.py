@@ -52,11 +52,12 @@ def _make_full_response_pairs(
     *,
     max_rejected_attempts: int,
 ) -> list[DPOPair]:
-    """Match context_alignment's balanced DPO construction.
+    """Build two DPO pairs for one valid intervention.
 
-    For one valid edit, emit two pairs:
-    - edit direction: edited mediator prefers edited answer over gold answer;
-    - gold direction: gold mediator prefers gold answer over edited answer.
+    1. gold response beats mismatched edited mediator with gold SQL:
+       X-M-Y > X-M'-Y
+    2. edited faithful response beats mismatched edited mediator with gold SQL:
+       X-M'-Y' > X-M'-Y
     """
     gold_med = dataset.gold_mediator(entry)
     gold_answer = dataset.gold_answer(entry)
@@ -70,27 +71,27 @@ def _make_full_response_pairs(
         if not _is_self_faithful(dataset, entry, intervened_med, intervened_answer):
             continue
 
-        edit_chosen = dataset.render_mediator(intervened_med, answer=intervened_answer)
-        edit_rejected = dataset.render_mediator(intervened_med, answer=gold_answer)
         gold_chosen = dataset.render_mediator(gold_med, answer=gold_answer)
-        gold_rejected = dataset.render_mediator(gold_med, answer=intervened_answer)
+        shared_rejected = dataset.render_mediator(intervened_med, answer=gold_answer)
+        edit_chosen = dataset.render_mediator(intervened_med, answer=intervened_answer)
 
-        pairs: list[DPOPair] = []
-        if edit_chosen != edit_rejected:
-            pairs.append(DPOPair(
-                prompt=prompt,
-                chosen=edit_chosen,
-                rejected=edit_rejected,
-                kind="full_response_edit",
-            ))
-        if gold_chosen != gold_rejected:
-            pairs.append(DPOPair(
+        if gold_chosen == shared_rejected or edit_chosen == shared_rejected:
+            continue
+
+        return [
+            DPOPair(
                 prompt=prompt,
                 chosen=gold_chosen,
-                rejected=gold_rejected,
+                rejected=shared_rejected,
                 kind="full_response_gold",
-            ))
-        return pairs
+            ),
+            DPOPair(
+                prompt=prompt,
+                chosen=edit_chosen,
+                rejected=shared_rejected,
+                kind="full_response_edit",
+            ),
+        ]
 
     return []
 
@@ -109,9 +110,9 @@ def make_dpo_pairs(
     """Build DPO pairs for one entry. Both kinds share the same intervened mediator.
 
     full_response:
-        Balanced context_alignment-style DPO:
-        edit pair: edited M + edited SQL > edited M + gold SQL
-        gold pair: gold M + gold SQL > gold M + edited SQL
+        Two DPO pairs per valid intervention:
+        gold pair: X-M-Y > X-M'-Y
+        edit pair: X-M'-Y' > X-M'-Y
 
         Edited SQL is included only if it is self-faithful to the edited mediator.
 
@@ -212,7 +213,7 @@ def iter_dpo_pairs(
             break
         if limit is not None and n >= limit:
             break
-        for pair in make_dpo_pairs(
+        sample_pairs = make_dpo_pairs(
             dataset,
             intervention,
             entry,
@@ -221,7 +222,10 @@ def iter_dpo_pairs(
             kinds=kinds,
             chosen_intervention_prob=chosen_intervention_prob,
             max_rejected_attempts=max_rejected_attempts,
-        ):
+        )
+        if limit is not None and n + len(sample_pairs) > limit:
+            return
+        for pair in sample_pairs:
             yield pair
             n += 1
             if limit is not None and n >= limit:
