@@ -158,6 +158,92 @@ def plot_performance_fid_bars(
     plt.close(fig)
 
 
+def _pct_change(before: float, after: float) -> float | None:
+    """Relative change in percent: (after - before) / before * 100. None if before == 0."""
+    if before == 0:
+        return None
+    return (after - before) / before * 100.0
+
+
+def _delta_label(before: float, after: float) -> str:
+    pct = _pct_change(before, after)
+    if pct is None:
+        # no relative baseline; fall back to absolute change in points
+        return f"{after - before:+.3f}"
+    return f"{pct:+.1f}%"
+
+
+def plot_dpo_before_after(
+    pairs: Sequence[tuple[dict, dict]],
+    out_path: str,
+    *,
+    labels: Sequence[str] | None = None,
+) -> None:
+    """Grouped bars comparing F_ID and Performance before vs after DPO.
+
+    `pairs` is a sequence of (before_report, after_report). One group per pair; within a
+    group: F_ID(before, after) and Performance(before, after). Above each metric the
+    relative change after DPO is annotated (+% green when it rose, -% red when it fell)."""
+    if not pairs:
+        raise ValueError("No (before, after) report pairs given.")
+
+    if labels is None:
+        labels = [str(b.get("model", "?")).split("/")[-1] for b, _ in pairs]
+
+    fid_b = [float(b.get("faithfulness_id", 0.0)) for b, _ in pairs]
+    fid_a = [float(a.get("faithfulness_id", 0.0)) for _, a in pairs]
+    perf_b = [float(b.get("performance", 0.0)) for b, _ in pairs]
+    perf_a = [float(a.get("performance", 0.0)) for _, a in pairs]
+
+    n = len(pairs)
+    x = np.arange(n, dtype=float)
+    bw = 0.18
+    offs = {"fid_b": -0.30, "fid_a": -0.10, "perf_b": 0.12, "perf_a": 0.32}
+
+    fig_w = max(7.2, 2.4 * n)
+    fig, ax = plt.subplots(figsize=(fig_w, 5.0))
+
+    ax.bar(x + offs["fid_b"], fid_b, width=bw, color="#f58518", alpha=0.45, label=r"$F_{ID}$ (before)")
+    ax.bar(x + offs["fid_a"], fid_a, width=bw, color="#f58518", label=r"$F_{ID}$ (after)")
+    ax.bar(x + offs["perf_b"], perf_b, width=bw, color="#4c78a8", alpha=0.45, label="Performance (before)")
+    ax.bar(x + offs["perf_a"], perf_a, width=bw, color="#4c78a8", label="Performance (after)")
+
+    top = max([*fid_b, *fid_a, *perf_b, *perf_a, 0.0])
+    pad = 0.04 * (top if top > 0 else 1.0)
+
+    def _annotate(center: float, before: float, after: float) -> None:
+        height = max(before, after)
+        rose = after >= before
+        ax.annotate(
+            _delta_label(before, after),
+            (center, height + pad),
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            fontweight="bold",
+            color="#2a9d3f" if rose else "#d62728",
+        )
+
+    for i in range(n):
+        # value labels on each bar
+        for key, val in (("fid_b", fid_b[i]), ("fid_a", fid_a[i]), ("perf_b", perf_b[i]), ("perf_a", perf_a[i])):
+            ax.annotate(f"{val:.3f}", (x[i] + offs[key], val), ha="center", va="bottom", fontsize=7, color="#444")
+        # relative change centered over each metric's before/after sub-pair
+        _annotate(x[i] + (offs["fid_b"] + offs["fid_a"]) / 2, fid_b[i], fid_a[i])
+        _annotate(x[i] + (offs["perf_b"] + offs["perf_a"]) / 2, perf_b[i], perf_a[i])
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(list(labels), fontsize=9)
+    ax.set_ylim(0.0, min(1.0, top + 6 * pad) if top > 0 else 1.0)
+    ax.set_ylabel("Score")
+    ax.set_title("F_ID and Performance: before vs after DPO")
+    ax.grid(True, axis="y", alpha=0.3)
+    ax.legend(fontsize=8, ncol=2)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=220)
+    plt.close(fig)
+
+
 def plot_token_entropy_vs_index(
     series: Sequence[tuple],
     out_path: str,
